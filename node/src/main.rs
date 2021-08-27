@@ -1,4 +1,4 @@
-use ethereum::{EthereumNetworks, NodeCapabilities, ProviderEthRpcMetrics};
+// use ethereum::{EthereumNetworks, NodeCapabilities, ProviderEthRpcMetrics};
 use futures::future::join_all;
 use git_testament::{git_testament, render_testament};
 use graph::sf::endpoints::{FirehoseEndpoint, FirehoseNetworkEndpoints, FirehoseNetworks};
@@ -19,7 +19,8 @@ use graph::data::graphql::effort::LoadManager;
 use graph::log::logger;
 use graph::prelude::{IndexNodeServer as _, JsonRpcServer as _, *};
 use graph::util::security::SafeDisplay;
-use graph_chain_ethereum::{self as ethereum, network_indexer, EthereumAdapterTrait, Transport};
+// use graph_chain_ethereum::{self as ethereum, network_indexer, EthereumAdapterTrait, Transport};
+use graph_chain_near::{self as near};
 use graph_core::{
     LinkResolver, MetricsRegistry, SubgraphAssignmentProvider as IpfsSubgraphAssignmentProvider,
     SubgraphInstanceManager, SubgraphRegistrar as IpfsSubgraphRegistrar,
@@ -182,13 +183,14 @@ async fn main() {
 
     // Ethereum clients; query nodes ignore all ethereum clients and never
     // connect to them directly
-    let eth_networks = if query_only {
-        EthereumNetworks::new()
-    } else {
-        create_ethereum_networks(logger.clone(), metrics_registry.clone(), config.clone())
-            .await
-            .expect("Failed to parse Ethereum networks")
-    };
+    // FIXME (NEAR): NEAR support does not require an actual ethereum network, only Firehose
+    // let eth_networks = if query_only {
+    //     EthereumNetworks::new()
+    // } else {
+    //     create_ethereum_networks(logger.clone(), metrics_registry.clone(), config.clone())
+    //         .await
+    //         .expect("Failed to parse Ethereum networks")
+    // };
 
     let firehose_networks = if query_only {
         FirehoseNetworks::new()
@@ -208,7 +210,8 @@ async fn main() {
         StoreBuilder::new(&logger, &node_id, &config, metrics_registry.cheap_clone()).await;
 
     let launch_services = |logger: Logger| async move {
-        let (eth_networks, idents) = connect_networks(&logger, eth_networks).await;
+        // FIXME (NEAR): We should only connect to ethereum networks, disabled for now while we re-work this part
+        // let (eth_networks, idents) = connect_networks(&logger, eth_networks).await;
 
         let subscription_manager = store_builder.subscription_manager();
         let chain_head_update_listener = store_builder.chain_head_update_listener();
@@ -252,52 +255,54 @@ async fn main() {
         );
 
         // Spawn Ethereum network indexers for all networks that are to be indexed
-        opt.network_subgraphs
-            .iter()
-            .filter(|network_subgraph| network_subgraph.starts_with("ethereum/"))
-            .for_each(|network_subgraph| {
-                let network_name = network_subgraph.replace("ethereum/", "");
-                let mut indexer = network_indexer::NetworkIndexer::new(
-                    &logger,
-                    eth_networks
-                        .adapter_with_capabilities(
-                            network_name.clone(),
-                            &NodeCapabilities {
-                                archive: false,
-                                traces: false,
-                            },
-                        )
-                        .expect(&*format!("adapter for network, {}", network_name))
-                        .clone(),
-                    network_store.subgraph_store(),
-                    metrics_registry.clone(),
-                    format!("network/{}", network_subgraph).into(),
-                    None,
-                    network_name,
-                );
-                graph::spawn(
-                    indexer
-                        .take_event_stream()
-                        .unwrap()
-                        .for_each(|_| {
-                            // For now we simply ignore these events; we may later use them
-                            // to drive subgraph indexing
-                            Ok(())
-                        })
-                        .compat(),
-                );
-            });
+        // FIXME (NEAR): Disable network_indexer for NEAR
+        // opt.network_subgraphs
+        //     .iter()
+        //     .filter(|network_subgraph| network_subgraph.starts_with("ethereum/"))
+        //     .for_each(|network_subgraph| {
+        //         let network_name = network_subgraph.replace("ethereum/", "");
+        //         let mut indexer = network_indexer::NetworkIndexer::new(
+        //             &logger,
+        //             eth_networks
+        //                 .adapter_with_capabilities(
+        //                     network_name.clone(),
+        //                     &NodeCapabilities {
+        //                         archive: false,
+        //                         traces: false,
+        //                     },
+        //                 )
+        //                 .expect(&*format!("adapter for network, {}", network_name))
+        //                 .clone(),
+        //             network_store.subgraph_store(),
+        //             metrics_registry.clone(),
+        //             format!("network/{}", network_subgraph).into(),
+        //             None,
+        //             network_name,
+        //         );
+        //         graph::spawn(
+        //             indexer
+        //                 .take_event_stream()
+        //                 .unwrap()
+        //                 .for_each(|_| {
+        //                     // For now we simply ignore these events; we may later use them
+        //                     // to drive subgraph indexing
+        //                     Ok(())
+        //                 })
+        //                 .compat(),
+        //         );
+        //     });
 
-        if !opt.disable_block_ingestor {
-            let block_polling_interval = Duration::from_millis(opt.ethereum_polling_interval);
+        // FIXME (NEAR): Block ingestor is always disabled for now on NEAR, do we really need it?
+        // if !opt.disable_block_ingestor {
+        //     let block_polling_interval = Duration::from_millis(opt.ethereum_polling_interval);
 
-            start_block_ingestor(&logger, block_polling_interval, &chains);
+        //     start_block_ingestor(&logger, block_polling_interval, &chains);
 
-            // Start a task runner
-            let mut job_runner = graph::util::jobs::Runner::new(&logger);
-            register_store_jobs(&mut job_runner, network_store.clone());
-            graph::spawn_blocking(job_runner.start());
-        }
+        //     // Start a task runner
+        //     let mut job_runner = graph::util::jobs::Runner::new(&logger);
+        //     register_store_jobs(&mut job_runner, network_store.clone());
+        //     graph::spawn_blocking(job_runner.start());
+        // }
 
         let subgraph_instance_manager = SubgraphInstanceManager::new(
             &logger_factory,
@@ -486,61 +491,62 @@ async fn create_firehose_networks(
 }
 
 /// Parses an Ethereum connection string and returns the network name and Ethereum adapter.
-async fn create_ethereum_networks(
-    logger: Logger,
-    registry: Arc<MetricsRegistry>,
-    config: Config,
-) -> Result<EthereumNetworks, anyhow::Error> {
-    let eth_rpc_metrics = Arc::new(ProviderEthRpcMetrics::new(registry));
-    let mut parsed_networks = EthereumNetworks::new();
-    for (name, chain) in config.chains.chains {
-        for provider in chain.providers {
-            if let ProviderDetails::Web3(web3) = provider.details {
-                let capabilities = web3.node_capabilities();
+// FIXME (NEAR): Commented out since not used for now, check the commented usage
+// async fn create_ethereum_networks(
+//     logger: Logger,
+//     registry: Arc<MetricsRegistry>,
+//     config: Config,
+// ) -> Result<EthereumNetworks, anyhow::Error> {
+//     let eth_rpc_metrics = Arc::new(ProviderEthRpcMetrics::new(registry));
+//     let mut parsed_networks = EthereumNetworks::new();
+//     for (name, chain) in config.chains.chains {
+//         for provider in chain.providers {
+//             if let ProviderDetails::Web3(web3) = provider.details {
+//                 let capabilities = web3.node_capabilities();
 
-                let logger = logger.new(o!("provider" => provider.label.clone()));
-                info!(
-                    logger,
-                    "Creating transport";
-                    "url" => &web3.url,
-                    "capabilities" => capabilities
-                );
+//                 let logger = logger.new(o!("provider" => provider.label.clone()));
+//                 info!(
+//                     logger,
+//                     "Creating transport";
+//                     "url" => &web3.url,
+//                     "capabilities" => capabilities
+//                 );
 
-                use crate::config::Transport::*;
+//                 use crate::config::Transport::*;
 
-                let (transport_event_loop, transport) = match web3.transport {
-                    Rpc => Transport::new_rpc(&web3.url, web3.headers),
-                    Ipc => Transport::new_ipc(&web3.url),
-                    Ws => Transport::new_ws(&web3.url),
-                };
+//                 let (transport_event_loop, transport) = match web3.transport {
+//                     Rpc => Transport::new_rpc(&web3.url, web3.headers),
+//                     Ipc => Transport::new_ipc(&web3.url),
+//                     Ws => Transport::new_ws(&web3.url),
+//                 };
 
-                // If we drop the event loop the transport will stop working.
-                // For now it's fine to just leak it.
-                std::mem::forget(transport_event_loop);
+//                 // If we drop the event loop the transport will stop working.
+//                 // For now it's fine to just leak it.
+//                 std::mem::forget(transport_event_loop);
 
-                let supports_eip_1898 = !web3.features.contains("no_eip1898");
+//                 let supports_eip_1898 = !web3.features.contains("no_eip1898");
 
-                parsed_networks.insert(
-                    name.to_string(),
-                    capabilities,
-                    Arc::new(
-                        graph_chain_ethereum::EthereumAdapter::new(
-                            logger,
-                            provider.label,
-                            &web3.url,
-                            transport,
-                            eth_rpc_metrics.clone(),
-                            supports_eip_1898,
-                        )
-                        .await,
-                    ),
-                );
-            }
-        }
-    }
-    parsed_networks.sort();
-    Ok(parsed_networks)
-}
+//                 parsed_networks.insert(
+//                     name.to_string(),
+//                     capabilities,
+//                     Arc::new(
+//                         graph_chain_ethereum::EthereumAdapter::new(
+//                             logger,
+//                             provider.label,
+//                             &web3.url,
+//                             transport,
+//                             eth_rpc_metrics.clone(),
+//                             supports_eip_1898,
+//                         )
+//                         .await,
+//                     ),
+//                 );
+//             }
+//         }
+//     }
+//     parsed_networks.sort();
+//     Ok(parsed_networks)
+// }
 
 /// Try to connect to all the providers in `eth_networks` and get their net
 /// version and genesis block. Return the same `eth_networks` and the
@@ -550,87 +556,88 @@ async fn create_ethereum_networks(
 /// them. If the connection attempt to a provider times out after
 /// `ETH_NET_VERSION_WAIT_TIME`, keep the provider, but don't report a
 /// version for it.
-async fn connect_networks(
-    logger: &Logger,
-    mut eth_networks: EthereumNetworks,
-) -> (
-    EthereumNetworks,
-    Vec<(String, Vec<EthereumNetworkIdentifier>)>,
-) {
-    // The status of a provider that we learned from connecting to it
-    #[derive(PartialEq)]
-    enum Status {
-        Broken {
-            network: String,
-            provider: String,
-        },
-        Version {
-            network: String,
-            ident: EthereumNetworkIdentifier,
-        },
-    }
+// FIXME (NEAR): Unused for now so commented out
+// async fn connect_networks(
+//     logger: &Logger,
+//     mut eth_networks: EthereumNetworks,
+// ) -> (
+//     EthereumNetworks,
+//     Vec<(String, Vec<EthereumNetworkIdentifier>)>,
+// ) {
+//     // The status of a provider that we learned from connecting to it
+//     #[derive(PartialEq)]
+//     enum Status {
+//         Broken {
+//             network: String,
+//             provider: String,
+//         },
+//         Version {
+//             network: String,
+//             ident: EthereumNetworkIdentifier,
+//         },
+//     }
 
-    // This has one entry for each provider, and therefore multiple entries
-    // for each network
-    let statuses = join_all(
-        eth_networks
-            .flatten()
-            .into_iter()
-            .map(|(network_name, capabilities, eth_adapter)| {
-                (network_name, capabilities, eth_adapter, logger.clone())
-            })
-            .map(|(network, capabilities, eth_adapter, logger)| async move {
-                let logger = logger.new(o!("provider" => eth_adapter.provider().to_string()));
-                info!(
-                    logger, "Connecting to Ethereum to get network identifier";
-                    "capabilities" => &capabilities
-                );
-                match tokio::time::timeout(ETH_NET_VERSION_WAIT_TIME, eth_adapter.net_identifiers())
-                    .await
-                    .map_err(Error::from)
-                {
-                    // An `Err` means a timeout, an `Ok(Err)` means some other error (maybe a typo
-                    // on the URL)
-                    Ok(Err(e)) | Err(e) => {
-                        error!(logger, "Connection to provider failed. Not using this provider";
-                                       "error" =>  e.to_string());
-                        Status::Broken {
-                            network,
-                            provider: eth_adapter.provider().to_string(),
-                        }
-                    }
-                    Ok(Ok(ident)) => {
-                        info!(
-                            logger,
-                            "Connected to Ethereum";
-                            "network_version" => &ident.net_version,
-                            "capabilities" => &capabilities
-                        );
-                        Status::Version { network, ident }
-                    }
-                }
-            }),
-    )
-    .await;
+//     // This has one entry for each provider, and therefore multiple entries
+//     // for each network
+//     let statuses = join_all(
+//         eth_networks
+//             .flatten()
+//             .into_iter()
+//             .map(|(network_name, capabilities, eth_adapter)| {
+//                 (network_name, capabilities, eth_adapter, logger.clone())
+//             })
+//             .map(|(network, capabilities, eth_adapter, logger)| async move {
+//                 let logger = logger.new(o!("provider" => eth_adapter.provider().to_string()));
+//                 info!(
+//                     logger, "Connecting to Ethereum to get network identifier";
+//                     "capabilities" => &capabilities
+//                 );
+//                 match tokio::time::timeout(ETH_NET_VERSION_WAIT_TIME, eth_adapter.net_identifiers())
+//                     .await
+//                     .map_err(Error::from)
+//                 {
+//                     // An `Err` means a timeout, an `Ok(Err)` means some other error (maybe a typo
+//                     // on the URL)
+//                     Ok(Err(e)) | Err(e) => {
+//                         error!(logger, "Connection to provider failed. Not using this provider";
+//                                        "error" =>  e.to_string());
+//                         Status::Broken {
+//                             network,
+//                             provider: eth_adapter.provider().to_string(),
+//                         }
+//                     }
+//                     Ok(Ok(ident)) => {
+//                         info!(
+//                             logger,
+//                             "Connected to Ethereum";
+//                             "network_version" => &ident.net_version,
+//                             "capabilities" => &capabilities
+//                         );
+//                         Status::Version { network, ident }
+//                     }
+//                 }
+//             }),
+//     )
+//     .await;
 
-    // Group identifiers by network name
-    let idents: HashMap<String, Vec<EthereumNetworkIdentifier>> =
-        statuses
-            .into_iter()
-            .fold(HashMap::new(), |mut networks, status| {
-                match status {
-                    Status::Broken { network, provider } => {
-                        eth_networks.remove(&network, &provider)
-                    }
-                    Status::Version { network, ident } => {
-                        networks.entry(network.to_string()).or_default().push(ident)
-                    }
-                }
-                networks
-            });
-    let idents: Vec<_> = idents.into_iter().collect();
-    (eth_networks, idents)
-}
+//     // Group identifiers by network name
+//     let idents: HashMap<String, Vec<EthereumNetworkIdentifier>> =
+//         statuses
+//             .into_iter()
+//             .fold(HashMap::new(), |mut networks, status| {
+//                 match status {
+//                     Status::Broken { network, provider } => {
+//                         eth_networks.remove(&network, &provider)
+//                     }
+//                     Status::Version { network, ident } => {
+//                         networks.entry(network.to_string()).or_default().push(ident)
+//                     }
+//                 }
+//                 networks
+//             });
+//     let idents: Vec<_> = idents.into_iter().collect();
+//     (eth_networks, idents)
+// }
 
 fn create_ipfs_clients(logger: &Logger, ipfs_addresses: &Vec<String>) -> Vec<IpfsClient> {
     // Parse the IPFS URL from the `--ipfs` command line argument
@@ -699,202 +706,135 @@ fn create_ipfs_clients(logger: &Logger, ipfs_addresses: &Vec<String>) -> Vec<Ipf
         .collect()
 }
 
-fn create_chains(
+// FIXME (NEAR): We change the signature to adapt for NEAR, this will need to be re-worked to support mutli chain,
+//               how are we going to decide about which "chain" to construct here?
+// fn create_chains(
+//     logger: &Logger,
+//     node_id: NodeId,
+//     registry: Arc<MetricsRegistry>,
+//     firehose_networks: &FirehoseNetworks,
+//     eth_networks: &EthereumNetworks,
+//     store: &Store,
+//     chain_head_update_listener: Arc<ChainHeadUpdateListener>,
+//     logger_factory: &LoggerFactory,
+// ) -> HashMap<String, Arc<ethereum::Chain>> {
+//     let chains = eth_networks
+//         .networks
+//         .iter()
+//         .filter_map(|(network_name, eth_adapters)| {
+//             store
+//                 .block_store()
+//                 .chain_store(network_name)
+//                 .map(|chain_store| {
+//                     let is_ingestible = chain_store.is_ingestible();
+//                     (network_name, eth_adapters, chain_store, is_ingestible)
+//                 })
+//                 .or_else(|| {
+//                     error!(
+//                         logger,
+//                         "No store configured for chain {}; ignoring this chain", network_name
+//                     );
+//                     None
+//                 })
+//         })
+//         .map(|(network_name, eth_adapters, chain_store, is_ingestible)| {
+//             let firehose_endpoints = firehose_networks.networks.get(network_name);
+
+//             let chain = ethereum::Chain::new(
+//                 logger_factory.clone(),
+//                 network_name.clone(),
+//                 node_id.clone(),
+//                 registry.clone(),
+//                 chain_store.cheap_clone(),
+//                 chain_store,
+//                 store.subgraph_store(),
+//                 firehose_endpoints.map_or_else(|| FirehoseNetworkEndpoints::new(), |v| v.clone()),
+//                 eth_adapters.clone(),
+//                 chain_head_update_listener.clone(),
+//                 *ANCESTOR_COUNT,
+//                 *REORG_THRESHOLD,
+//                 is_ingestible,
+//             );
+//             (network_name.clone(), Arc::new(chain))
+//         });
+//     HashMap::from_iter(chains)
+// }
+
+fn create_near_chains(
     logger: &Logger,
-    node_id: NodeId,
     registry: Arc<MetricsRegistry>,
     firehose_networks: &FirehoseNetworks,
-    eth_networks: &EthereumNetworks,
     store: &Store,
-    chain_head_update_listener: Arc<ChainHeadUpdateListener>,
     logger_factory: &LoggerFactory,
-) -> HashMap<String, Arc<ethereum::Chain>> {
-    let chains = eth_networks
+) -> HashMap<String, Arc<near::Chain>> {
+    firehose_networks
         .networks
         .iter()
-        .filter_map(|(network_name, eth_adapters)| {
-            store
-                .block_store()
-                .chain_store(network_name)
-                .map(|chain_store| {
-                    let is_ingestible = chain_store.is_ingestible();
-                    (network_name, eth_adapters, chain_store, is_ingestible)
-                })
-                .or_else(|| {
-                    error!(
-                        logger,
-                        "No store configured for chain {}; ignoring this chain", network_name
-                    );
-                    None
-                })
-        })
-        .map(|(network_name, eth_adapters, chain_store, is_ingestible)| {
-            let firehose_endpoints = firehose_networks.networks.get(network_name);
-
-            let chain = ethereum::Chain::new(
-                logger_factory.clone(),
+        .map(|(network_name, firehose_network)| {
+            (
                 network_name.clone(),
-                node_id.clone(),
-                registry.clone(),
-                chain_store.cheap_clone(),
-                chain_store,
-                store.subgraph_store(),
-                firehose_endpoints.map_or_else(|| FirehoseNetworkEndpoints::new(), |v| v.clone()),
-                eth_adapters.clone(),
-                chain_head_update_listener.clone(),
-                *ANCESTOR_COUNT,
-                *REORG_THRESHOLD,
-                is_ingestible,
-            );
-            (network_name.clone(), Arc::new(chain))
+                Arc::new(near::Chain::new(
+                    logger_factory.clone(),
+                    network_name.clone(),
+                    registry.clone(),
+                    chain_store.cheap_clone(),
+                    chain_store,
+                    store.subgraph_store(),
+                    firehose_endpoints
+                        .map_or_else(|| FirehoseNetworkEndpoints::new(), |v| v.clone()),
+                )),
+            )
         });
+
     HashMap::from_iter(chains)
 }
 
-fn start_block_ingestor(
-    logger: &Logger,
-    block_polling_interval: Duration,
-    chains: &HashMap<String, Arc<ethereum::Chain>>,
-) {
-    // BlockIngestor must be configured to keep at least REORG_THRESHOLD ancestors,
-    // otherwise BlockStream will not work properly.
-    // BlockStream expects the blocks after the reorg threshold to be present in the
-    // database.
-    assert!(*ANCESTOR_COUNT >= *REORG_THRESHOLD);
+// FIXME (NEAR): start_block_ingestor is not used right now on NEAR, so this unsued function is commented out
+// fn start_block_ingestor(
+//     logger: &Logger,
+//     block_polling_interval: Duration,
+//     chains: &HashMap<String, Arc<ethereum::Chain>>,
+// ) {
+//     // BlockIngestor must be configured to keep at least REORG_THRESHOLD ancestors,
+//     // otherwise BlockStream will not work properly.
+//     // BlockStream expects the blocks after the reorg threshold to be present in the
+//     // database.
+//     assert!(*ANCESTOR_COUNT >= *REORG_THRESHOLD);
 
-    info!(
-        logger,
-        "Starting block ingestors with {} chains [{}]",
-        chains.len(),
-        chains
-            .keys()
-            .map(|v| v.clone())
-            .collect::<Vec<String>>()
-            .join(", ")
-    );
+//     info!(
+//         logger,
+//         "Starting block ingestors with {} chains [{}]",
+//         chains.len(),
+//         chains
+//             .keys()
+//             .map(|v| v.clone())
+//             .collect::<Vec<String>>()
+//             .join(", ")
+//     );
 
-    // Create Ethereum block ingestors and spawn a thread to run each
-    chains
-        .iter()
-        .filter(|(network_name, chain)| {
-            if !chain.is_ingestible {
-                error!(logger, "Not starting block ingestor (chain is defective)"; "network_name" => &network_name);
-            }
-            chain.is_ingestible
-        })
-        .for_each(|(network_name, chain)| {
-            info!(
-                logger,
-                "Starting block ingestor for network";
-                "network_name" => &network_name
-            );
+//     // Create Ethereum block ingestors and spawn a thread to run each
+//     chains
+//         .iter()
+//         .filter(|(network_name, chain)| {
+//             if !chain.is_ingestible {
+//                 error!(logger, "Not starting block ingestor (chain is defective)"; "network_name" => &network_name);
+//             }
+//             chain.is_ingestible
+//         })
+//         .for_each(|(network_name, chain)| {
+//             info!(
+//                 logger,
+//                 "Starting block ingestor for network";
+//                 "network_name" => &network_name
+//             );
 
-            let block_ingestor = BlockIngestor::<ethereum::Chain>::new(
-                chain.ingestor_adapter(),
-                block_polling_interval,
-            )
-            .expect("failed to create Ethereum block ingestor");
+//             let block_ingestor = BlockIngestor::<ethereum::Chain>::new(
+//                 chain.ingestor_adapter(),
+//                 block_polling_interval,
+//             )
+//             .expect("failed to create Ethereum block ingestor");
 
-            // Run the Ethereum block ingestor in the background
-            graph::spawn(block_ingestor.into_polling_stream());
-        });
-}
-
-#[cfg(test)]
-mod test {
-    use super::create_ethereum_networks;
-    use crate::config::{Config, Opt};
-    use graph::log::logger;
-    use graph::prelude::tokio;
-    use graph::prometheus::Registry;
-    use graph_chain_ethereum::NodeCapabilities;
-    use graph_core::MetricsRegistry;
-    use std::sync::Arc;
-
-    #[tokio::test]
-    async fn correctly_parse_ethereum_networks() {
-        let logger = logger(true);
-
-        let network_args = vec![
-            "mainnet:traces:http://localhost:8545/".to_string(),
-            "goerli:archive:http://localhost:8546/".to_string(),
-        ];
-
-        let opt = Opt {
-            postgres_url: Some("not needed".to_string()),
-            config: None,
-            store_connection_pool_size: 5,
-            postgres_secondary_hosts: vec![],
-            postgres_host_weights: vec![],
-            disable_block_ingestor: true,
-            node_id: "default".to_string(),
-            ethereum_rpc: network_args,
-            ethereum_ws: vec![],
-            ethereum_ipc: vec![],
-        };
-
-        let config = Config::load(&logger, &opt).expect("can create config");
-        let prometheus_registry = Arc::new(Registry::new());
-        let metrics_registry = Arc::new(MetricsRegistry::new(
-            logger.clone(),
-            prometheus_registry.clone(),
-        ));
-
-        let ethereum_networks = create_ethereum_networks(logger, metrics_registry, config.clone())
-            .await
-            .expect("Correctly parse Ethereum network args");
-        let mut network_names = ethereum_networks.networks.keys().collect::<Vec<&String>>();
-        network_names.sort();
-
-        let traces = NodeCapabilities {
-            archive: false,
-            traces: true,
-        };
-        let archive = NodeCapabilities {
-            archive: true,
-            traces: false,
-        };
-        let has_mainnet_with_traces = ethereum_networks
-            .adapter_with_capabilities("mainnet".to_string(), &traces)
-            .is_ok();
-        let has_goerli_with_archive = ethereum_networks
-            .adapter_with_capabilities("goerli".to_string(), &archive)
-            .is_ok();
-        let has_mainnet_with_archive = ethereum_networks
-            .adapter_with_capabilities("mainnet".to_string(), &archive)
-            .is_ok();
-        let has_goerli_with_traces = ethereum_networks
-            .adapter_with_capabilities("goerli".to_string(), &traces)
-            .is_ok();
-
-        assert_eq!(has_mainnet_with_traces, true);
-        assert_eq!(has_goerli_with_archive, true);
-        assert_eq!(has_mainnet_with_archive, false);
-        assert_eq!(has_goerli_with_traces, false);
-
-        let goerli_capability = ethereum_networks
-            .networks
-            .get("goerli")
-            .unwrap()
-            .adapters
-            .iter()
-            .next()
-            .unwrap()
-            .capabilities;
-        let mainnet_capability = ethereum_networks
-            .networks
-            .get("mainnet")
-            .unwrap()
-            .adapters
-            .iter()
-            .next()
-            .unwrap()
-            .capabilities;
-        assert_eq!(
-            network_names,
-            vec![&"goerli".to_string(), &"mainnet".to_string()]
-        );
-        assert_eq!(goerli_capability, archive);
-        assert_eq!(mainnet_capability, traces);
-    }
-}
+//             // Run the Ethereum block ingestor in the background
+//             graph::spawn(block_ingestor.into_polling_stream());
+//         });
+// }
