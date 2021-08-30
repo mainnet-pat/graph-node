@@ -14,10 +14,10 @@ use super::bstream;
 
 #[derive(Clone)]
 pub struct FirehoseEndpoint {
-    provider: String,
-    uri: String,
+    pub provider: String,
+    pub uri: String,
+    pub token: Option<String>,
     channel: Channel,
-    token: Option<String>,
     logger: Logger,
 }
 
@@ -153,5 +153,19 @@ impl FirehoseNetworks {
         if let Some(endpoints) = self.networks.get_mut(name) {
             endpoints.remove(provider);
         }
+    }
+
+    pub fn flatten(&self) -> Vec<(String, Arc<FirehoseEndpoint>)> {
+        self.networks
+            .iter()
+            .flat_map(|(network_name, firehose_endpoints)| {
+                firehose_endpoints
+                    .endpoints
+                    .iter()
+                    .map(move |firehose_endpoint| {
+                        (network_name.clone(), firehose_endpoint.endpoint.clone())
+                    })
+            })
+            .collect()
     }
 }

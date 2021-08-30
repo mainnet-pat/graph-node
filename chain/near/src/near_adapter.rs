@@ -1,17 +1,12 @@
-use graph::{
-    blockchain::BlockPtr,
-    prelude::{
-        CheapClone, Logger,
-    },
-};
-
-use crate::chain::BlockFinality;
 use crate::{
-    adapter::{
-        NearAdapter as NearAdapterTrait, NearBlockFilter,
-    },
-    trigger::{NearBlockTriggerType, NearTrigger},
+    adapter::{NearAdapter as NearAdapterTrait, NearBlockFilter},
+    trigger::NearTrigger,
 };
+use graph::{
+    components::near::NearBlock,
+    prelude::{CheapClone, Logger},
+};
+use tonic::async_trait;
 
 #[derive(Clone)]
 pub struct NearAdapter {
@@ -22,20 +17,15 @@ pub struct NearAdapter {
 impl CheapClone for NearAdapter {
     fn cheap_clone(&self) -> Self {
         Self {
+            logger: self.logger.clone(),
             provider: self.provider.clone(),
         }
     }
 }
 
 impl NearAdapter {
-    pub async fn new(
-        logger: Logger,
-        provider: String,
-    ) -> Self {
-        NearAdapter {
-            logger,
-            provider,
-        }
+    pub async fn new(logger: Logger, provider: String) -> Self {
+        NearAdapter { logger, provider }
     }
 }
 
@@ -48,7 +38,7 @@ impl NearAdapterTrait for NearAdapter {
 
 pub(crate) fn parse_block_triggers(
     block_filter: NearBlockFilter,
-    block: &EthereumBlockWithCalls,
+    block: &NearBlock,
 ) -> Vec<NearTrigger> {
     // FIXME (NEAR): Re-enable when compilation final work
     vec![]

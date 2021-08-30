@@ -1,6 +1,8 @@
 use anyhow::Error;
+use graph::components::near::NearBlock;
 use graph::data::subgraph::UnifiedMappingApiVersion;
-use graph::prelude::{LightEthereumBlock, LightEthereumBlockExt};
+use graph::prelude::web3::types::H256;
+use graph::prelude::{NodeId, StopwatchMetrics};
 use graph::sf::endpoints::FirehoseNetworkEndpoints;
 use graph::{
     blockchain::{
@@ -9,15 +11,14 @@ use graph::{
             FirehoseMapper as FirehoseMapperTrait, TriggersAdapter as TriggersAdapterTrait,
         },
         firehose_block_stream::FirehoseBlockStream,
-        Block, BlockHash, BlockPtr, Blockchain, IngestorAdapter as IngestorAdapterTrait,
-        IngestorError,
+        BlockHash, BlockPtr, Blockchain, IngestorAdapter as IngestorAdapterTrait, IngestorError,
     },
     cheap_clone::CheapClone,
     components::store::DeploymentLocator,
     log::factory::{ComponentLoggerConfig, ElasticComponentLoggerConfig},
     prelude::{
-        async_trait, o, BlockNumber, ChainStore, EthereumBlockWithCalls, Logger, LoggerFactory,
-        MetricsRegistry, SubgraphStore,
+        async_trait, o, BlockNumber, ChainStore, Logger, LoggerFactory, MetricsRegistry,
+        SubgraphStore,
     },
     sf::bstream,
 };
@@ -71,7 +72,7 @@ impl Chain {
 
 #[async_trait]
 impl Blockchain for Chain {
-    type Block = BlockFinality;
+    type Block = NearBlock;
 
     type DataSource = DataSource;
 
@@ -91,7 +92,7 @@ impl Blockchain for Chain {
 
     type TriggerFilter = crate::adapter::TriggerFilter;
 
-    type NodeCapabilities = ();
+    type NodeCapabilities = crate::capabilities::NodeCapabilities;
 
     type IngestorAdapter = IngestorAdapter;
 
@@ -102,6 +103,7 @@ impl Blockchain for Chain {
         loc: &DeploymentLocator,
         capabilities: &Self::NodeCapabilities,
         unified_api_version: UnifiedMappingApiVersion,
+        stopwatch_metrics: StopwatchMetrics,
     ) -> Result<Arc<Self::TriggersAdapter>, Error> {
         let logger = self
             .logger_factory
@@ -150,7 +152,8 @@ impl Blockchain for Chain {
             firehose_endpoint,
             firehose_cursor,
             firehose_mapper,
-            self.node_id.clone(),
+            // FIXME (NEAR): Hard-coded NodeId, this is actually not required for other chain ...
+            NodeId::new("near").unwrap(),
             deployment.hash,
             filter,
             start_blocks,
@@ -215,51 +218,56 @@ impl Blockchain for Chain {
     }
 }
 
-/// This is used in `NearAdapter::triggers_in_block`, called when re-processing a block for
-/// newly created data sources. This allows the re-processing to be reorg safe without having to
-/// always fetch the full block data.
-#[derive(Clone, Debug)]
-pub enum BlockFinality {
-    /// If a block is final, we only need the header and the triggers.
-    Final(Arc<LightEthereumBlock>),
+// FIXME (NEAR): Probably dead code, we always have the full block available, will it kill performance/memory
+//               though?
+// /// This is used in `NearAdapter::triggers_in_block`, called when re-processing a block for
+// /// newly created data sources. This allows the re-processing to be reorg safe without having to
+// /// always fetch the full block data.
+// #[derive(Clone, Debug)]
+// pub enum BlockFinality {
+//     /// If a block is final, we only need the header and the triggers.
+//     Final(Arc<LightEthereumBlock>),
 
-    // If a block may still be reorged, we need to work with more local data.
-    NonFinal(EthereumBlockWithCalls),
-}
+//     // If a block may still be reorged, we need to work with more local data.
+//     NonFinal(EthereumBlockWithCalls),
+// }
 
-impl BlockFinality {
-    pub(crate) fn light_block(&self) -> Arc<LightEthereumBlock> {
-        match self {
-            BlockFinality::Final(block) => block.cheap_clone(),
-            BlockFinality::NonFinal(block) => block.ethereum_block.block.cheap_clone(),
-        }
-    }
-}
+// FIXME (NEAR): Probably dead code
+// impl BlockFinality {
+//     pub(crate) fn light_block(&self) -> Arc<LightEthereumBlock> {
+//         match self {
+//             BlockFinality::Final(block) => block.cheap_clone(),
+//             BlockFinality::NonFinal(block) => block.ethereum_block.block.cheap_clone(),
+//         }
+//     }
+// }
 
-impl<'a> From<&'a BlockFinality> for BlockPtr {
-    fn from(block: &'a BlockFinality) -> BlockPtr {
-        match block {
-            BlockFinality::Final(b) => BlockPtr::from(&**b),
-            BlockFinality::NonFinal(b) => BlockPtr::from(&b.ethereum_block),
-        }
-    }
-}
+// FIXME (NEAR): Probably dead code
+// impl<'a> From<&'a BlockFinality> for BlockPtr {
+//     fn from(block: &'a BlockFinality) -> BlockPtr {
+//         match block {
+//             BlockFinality::Final(b) => BlockPtr::from(&**b),
+//             BlockFinality::NonFinal(b) => BlockPtr::from(&b.ethereum_block),
+//         }
+//     }
+// }
 
-impl Block for BlockFinality {
-    fn ptr(&self) -> BlockPtr {
-        match self {
-            BlockFinality::Final(block) => block.block_ptr(),
-            BlockFinality::NonFinal(block) => block.ethereum_block.block.block_ptr(),
-        }
-    }
+// FIXME (NEAR): Probably dead code
+// impl Block for BlockFinality {
+//     fn ptr(&self) -> BlockPtr {
+//         match self {
+//             BlockFinality::Final(block) => block.block_ptr(),
+//             BlockFinality::NonFinal(block) => block.ethereum_block.block.block_ptr(),
+//         }
+//     }
 
-    fn parent_ptr(&self) -> Option<BlockPtr> {
-        match self {
-            BlockFinality::Final(block) => block.parent_ptr(),
-            BlockFinality::NonFinal(block) => block.ethereum_block.block.parent_ptr(),
-        }
-    }
-}
+//     fn parent_ptr(&self) -> Option<BlockPtr> {
+//         match self {
+//             BlockFinality::Final(block) => block.parent_ptr(),
+//             BlockFinality::NonFinal(block) => block.ethereum_block.block.parent_ptr(),
+//         }
+//     }
+// }
 
 pub struct DummyDataSourceTemplate;
 
@@ -296,12 +304,17 @@ impl TriggersAdapterTrait<Chain> for TriggersAdapter {
     async fn triggers_in_block(
         &self,
         logger: &Logger,
-        block: BlockFinality,
+        block: NearBlock,
         filter: &TriggerFilter,
     ) -> Result<BlockWithTriggers<Chain>, Error> {
-        // FIXME (NEAR): Fix once it compiles properly
         Ok(BlockWithTriggers {
-            block: (),
+            // FIXME (NEAR): Hard-coded wrong block, will need to turn them into a proper stuff
+            block: NearBlock {
+                hash: H256::from([0x00; 32]),
+                number: 0,
+                parent_hash: None,
+                parent_number: None,
+            },
             trigger_data: vec![],
         })
         // let block = get_calls(
@@ -356,7 +369,7 @@ impl TriggersAdapterTrait<Chain> for TriggersAdapter {
         &self,
         ptr: BlockPtr,
         offset: BlockNumber,
-    ) -> Result<Option<BlockFinality>, Error> {
+    ) -> Result<Option<NearBlock>, Error> {
         // FIXME (NEAR): Commented out for none
         Ok(None)
         // let block = self.chain_store.ancestor_block(ptr, offset)?;
@@ -411,8 +424,14 @@ impl FirehoseMapper {
     ) -> Result<BlockWithTriggers<Chain>, FirehoseError> {
         // FIXME (NEAR): Firehose related!
         Ok(BlockWithTriggers {
-            block: (),
-            trigger_data: (),
+            // FIXME (NEAR): Hard-coded wrong block, will need to turn them into a proper stuff
+            block: NearBlock {
+                hash: H256::from([0x00; 32]),
+                number: 0,
+                parent_hash: None,
+                parent_number: None,
+            },
+            trigger_data: vec![],
         })
         // let mut triggers = Vec::new();
 
@@ -466,8 +485,19 @@ impl FirehoseMapperTrait<Chain> for FirehoseMapper {
 
             bstream::ForkStep::StepUndo => Ok(BlockStreamEvent::Revert(
                 BlockPtr {
-                    hash: BlockHash::from(block.hash),
-                    number: block.number as i32,
+                    hash: BlockHash::from(
+                        // FIXME (NEAR): Are we able to avoid the clone? I kind of doubt but worth checking deeper
+                        block
+                            .header
+                            .as_ref()
+                            .unwrap()
+                            .hash
+                            .as_ref()
+                            .unwrap()
+                            .bytes
+                            .clone(),
+                    ),
+                    number: block.header.as_ref().unwrap().height as i32,
                 },
                 Cursor::Some(response.cursor.clone()),
             )),

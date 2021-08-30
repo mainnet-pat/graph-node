@@ -1,5 +1,5 @@
+use crate::capabilities::NodeCapabilities;
 use crate::{data_source::DataSource, Chain};
-use futures::Future;
 use graph::prelude::*;
 use graph::{blockchain as bc, components::metrics::CounterVec};
 use mockall::automock;
@@ -11,12 +11,6 @@ use web3::types::Address;
 #[derive(Clone, Debug, Default)]
 pub struct TriggerFilter {
     pub(crate) block: NearBlockFilter,
-}
-
-impl TriggerFilter {
-    pub(crate) fn requires_traces(&self) -> bool {
-        !self.call.is_empty() || self.block.requires_traces()
-    }
 }
 
 impl bc::TriggerFilter<Chain> for TriggerFilter {
@@ -31,8 +25,8 @@ impl bc::TriggerFilter<Chain> for TriggerFilter {
             .extend(NearBlockFilter::from_data_sources(data_sources));
     }
 
-    fn node_capabilities(&self) -> () {
-        ()
+    fn node_capabilities(&self) -> NodeCapabilities {
+        NodeCapabilities {}
     }
 }
 

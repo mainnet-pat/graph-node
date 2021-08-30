@@ -1,5 +1,6 @@
-use anyhow::Context;
 use anyhow::Error;
+use graph::components::store::StoredDynamicDataSource;
+use std::collections::BTreeMap;
 use std::{convert::TryFrom, sync::Arc};
 
 use graph::{
@@ -47,7 +48,6 @@ impl blockchain::DataSource<Chain> for DataSource {
         block: Arc<<Chain as Blockchain>::Block>,
         logger: &Logger,
     ) -> Result<Option<<Chain as Blockchain>::MappingTrigger>, Error> {
-        let block = block.light_block();
         self.match_and_decode(trigger, block, logger)
     }
 
@@ -109,7 +109,6 @@ impl blockchain::DataSource<Chain> for DataSource {
             // The creation block is ignored for detection duplicate data sources.
             // Contract ABI equality is implicit in `source` and `mapping.abis` equality.
             creation_block: _,
-            contract_abi: _,
         } = self;
 
         // mapping_request_sender, host_metrics, and (most of) host_exports are operational structs
@@ -126,7 +125,18 @@ impl blockchain::DataSource<Chain> for DataSource {
             && context == &other.context
     }
 
-    // FIXME (NEAR): Commented out for now
+    fn as_stored_dynamic_data_source(&self) -> StoredDynamicDataSource {
+        todo!()
+    }
+
+    fn from_stored_dynamic_data_source(
+        templates: &BTreeMap<&str, &DataSourceTemplate>,
+        stored: StoredDynamicDataSource,
+    ) -> Result<Self, Error> {
+        todo!()
+    }
+
+    // FIXME (NEAR): Commented out for now, re-added `todo!()`
     // fn as_stored_dynamic_data_source(&self) -> StoredDynamicDataSource {
     //     StoredDynamicDataSource {
     //         name: self.name.to_owned(),
@@ -268,8 +278,9 @@ impl TryFrom<DataSourceTemplateInfo<Chain>> for DataSource {
             network: template.network,
             name: template.name,
             source: Source {
-                address: Some(address),
-                abi: template.source.abi,
+                // FIXME (NEAR): Made those element dummy elements
+                address: None,
+                abi: "".to_string(),
                 start_block: 0,
             },
             mapping: template.mapping,

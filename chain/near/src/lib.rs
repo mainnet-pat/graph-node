@@ -1,4 +1,5 @@
 mod adapter;
+mod capabilities;
 mod data_source;
 mod near_adapter;
 mod trigger;

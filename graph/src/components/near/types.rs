@@ -2,7 +2,10 @@ use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 use web3::types::H256;
 
-use crate::{blockchain::BlockPtr, prelude::BlockNumber};
+use crate::{
+    blockchain::{Block, BlockPtr},
+    prelude::BlockNumber,
+};
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 pub struct NearBlock {
@@ -23,6 +26,19 @@ impl From<NearBlock> for BlockPtr {
 impl<'a> From<&'a NearBlock> for BlockPtr {
     fn from(b: &'a NearBlock) -> BlockPtr {
         BlockPtr::from((b.hash, b.number))
+    }
+}
+
+impl Block for NearBlock {
+    fn ptr(&self) -> BlockPtr {
+        BlockPtr::from((self.hash, self.number))
+    }
+
+    fn parent_ptr(&self) -> Option<BlockPtr> {
+        match (self.parent_hash, self.parent_number) {
+            (Some(hash), Some(number)) => Some(BlockPtr::from((hash, number))),
+            _ => None,
+        }
     }
 }
 

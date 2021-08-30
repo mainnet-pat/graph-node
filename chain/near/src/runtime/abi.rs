@@ -1,11 +1,11 @@
+use crate::trigger::NearBlockData;
 use graph::prelude::BigInt;
 use graph::runtime::{asc_new, AscPtr, DeterministicHostError, ToAscObj};
 use graph::runtime::{AscHeap, AscIndexId, AscType, IndexForAscTypeId};
 use graph_runtime_derive::AscType;
 use graph_runtime_wasm::asc_abi::class::{AscBigInt, Uint8Array};
+use semver::Version;
 use std::mem::size_of;
-
-use crate::trigger::NearBlockData;
 
 type AscH256 = Uint8Array;
 
@@ -30,7 +30,11 @@ impl ToAscObj<AscNearBlock> for NearBlockData {
         Ok(AscNearBlock {
             hash: asc_new(heap, &self.hash)?,
             number: asc_new(heap, &BigInt::from(self.number))?,
-            timestamp: asc_new(heap, &BigInt::from(&self.timestamp))?,
+            timestamp: asc_new(heap, &BigInt::from(self.timestamp))?,
+            parent_hash: self
+                .parent_hash
+                .map(|parent_hash| asc_new(heap, &parent_hash))
+                .unwrap_or(Ok(AscPtr::null()))?,
         })
     }
 }

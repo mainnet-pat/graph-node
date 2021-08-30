@@ -1,6 +1,7 @@
 // use ethereum::{EthereumNetworks, NodeCapabilities, ProviderEthRpcMetrics};
 use futures::future::join_all;
 use git_testament::{git_testament, render_testament};
+use graph::prelude::web3::types::H256;
 use graph::sf::endpoints::{FirehoseEndpoint, FirehoseNetworkEndpoints, FirehoseNetworks};
 use graph::{ipfs_client::IpfsClient, prometheus::Registry};
 use lazy_static::lazy_static;
@@ -212,19 +213,65 @@ async fn main() {
     let launch_services = |logger: Logger| async move {
         // FIXME (NEAR): We should only connect to ethereum networks, disabled for now while we re-work this part
         // let (eth_networks, idents) = connect_networks(&logger, eth_networks).await;
+        let idents: Vec<(String, Vec<EthereumNetworkIdentifier>)> = firehose_networks
+            .flatten()
+            .into_iter()
+            .map(|(name, endpoint)| {
+                (
+                    name,
+                    // FIXME (NEAR): This is quite wrong, will need a refactor to remove the need to have a `EthereumNetworkIdentifier`
+                    //               to create an actual `NetworkStore` (see `store_builder.network_store`).
+                    EthereumNetworkIdentifier {
+                        genesis_block_hash: H256::from([0x00; 32]),
+                        net_version: endpoint.provider.clone(),
+                    },
+                )
+            })
+            .fold(
+                HashMap::<String, Vec<EthereumNetworkIdentifier>>::new(),
+                |mut networks, (name, endpoint)| {
+                    networks.entry(name.to_string()).or_default().push(endpoint);
+                    networks
+                },
+            )
+            .into_iter()
+            .collect();
+
+        // let idents: HashMap<String, Vec<EthereumNetworkIdentifier>> =
+        // statuses
+        //     .into_iter()
+        //     .fold(HashMap::new(), |mut networks, status| {
+        //         match status {
+        //             Status::Broken { network, provider } => {
+        //                 eth_networks.remove(&network, &provider)
+        //             }
+        //             Status::Version { network, ident } => {
+        //                 networks.entry(network.to_string()).or_default().push(ident)
+        //             }
+        //         }
+        //         networks
+        //     });
 
         let subscription_manager = store_builder.subscription_manager();
         let chain_head_update_listener = store_builder.chain_head_update_listener();
         let network_store = store_builder.network_store(idents);
 
-        let chains = Arc::new(create_chains(
+        // FIXME (NEAR): Add back Ethereum support
+        // let chains = Arc::new(create_chains(
+        //     &logger,
+        //     node_id.clone(),
+        //     metrics_registry.clone(),
+        //     &firehose_networks,
+        //     &eth_networks,
+        //     network_store.as_ref(),
+        //     chain_head_update_listener.clone(),
+        //     &logger_factory,
+        // ));
+        let chains = Arc::new(create_near_chains(
             &logger,
-            node_id.clone(),
             metrics_registry.clone(),
             &firehose_networks,
-            &eth_networks,
             network_store.as_ref(),
-            chain_head_update_listener.clone(),
             &logger_factory,
         ));
 
@@ -767,17 +814,31 @@ fn create_near_chains(
     store: &Store,
     logger_factory: &LoggerFactory,
 ) -> HashMap<String, Arc<near::Chain>> {
-    firehose_networks
+    let chains = firehose_networks
         .networks
         .iter()
-        .map(|(network_name, firehose_network)| {
+        .filter_map(|(network_name, firehose_endpoints)| {
+            store
+                .block_store()
+                .chain_store(network_name)
+                .map(|chain_store| (network_name, chain_store, firehose_endpoints))
+                .or_else(|| {
+                    error!(
+                        logger,
+                        "No store configured for chain {}; ignoring this chain", network_name
+                    );
+                    None
+                })
+        })
+        .map(|(network_name, chain_store, firehose_endpoints)| {
+            let firehose_endpoints = firehose_networks.networks.get(network_name);
+
             (
                 network_name.clone(),
                 Arc::new(near::Chain::new(
                     logger_factory.clone(),
                     network_name.clone(),
                     registry.clone(),
-                    chain_store.cheap_clone(),
                     chain_store,
                     store.subgraph_store(),
                     firehose_endpoints
