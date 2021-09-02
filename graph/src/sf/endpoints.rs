@@ -1,6 +1,6 @@
 use crate::cheap_clone::CheapClone;
 use anyhow::Context;
-use http::uri::Uri;
+use http::uri::{Scheme, Uri};
 use rand::prelude::IteratorRandom;
 use slog::Logger;
 use std::{collections::HashMap, fmt::Display, sync::Arc};
@@ -40,7 +40,7 @@ impl FirehoseEndpoint {
             .expect("the url should have been validated by now, so it is a valid Uri");
 
         let endpoint;
-        match uri.scheme().unwrap().as_str() {
+        match uri.scheme().unwrap_or_else(|| &Scheme::HTTP).as_str() {
             "http" => endpoint = Channel::builder(uri),
             "https" => {
                 endpoint = Channel::builder(uri)
@@ -51,7 +51,13 @@ impl FirehoseEndpoint {
         }
 
         let uri = endpoint.uri().to_string();
-        let channel = endpoint.connect().await?;
+        let channel = endpoint.connect().await.with_context(|| {
+            format!(
+                "unable to connect to firehose provider {} (at {})",
+                provider.as_ref(),
+                url.as_ref()
+            )
+        })?;
 
         Ok(FirehoseEndpoint {
             provider: provider.as_ref().to_string(),
@@ -66,14 +72,14 @@ impl FirehoseEndpoint {
         self: Arc<Self>,
         request: bstream::BlocksRequestV2,
     ) -> Result<tonic::Streaming<bstream::BlockResponseV2>, anyhow::Error> {
-        let token_metadata_opt = match self.token.clone() {
+        let token_metadata = match self.token.clone() {
             Some(token) => Some(MetadataValue::from_str(token.as_str())?),
             None => None,
         };
 
         let mut client = bstream::block_stream_v2_client::BlockStreamV2Client::with_interceptor(
             self.channel.cheap_clone(),
-            move |mut r: Request<()>| match token_metadata_opt.clone() {
+            move |mut r: Request<()>| match token_metadata.as_ref() {
                 Some(t) => {
                     r.metadata_mut().insert("authorization", t.clone());
                     Ok(r)

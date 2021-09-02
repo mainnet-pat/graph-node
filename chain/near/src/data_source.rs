@@ -1,4 +1,5 @@
 use anyhow::Error;
+use graph::components::near::NearBlockExt;
 use graph::components::store::StoredDynamicDataSource;
 use std::collections::BTreeMap;
 use std::{convert::TryFrom, sync::Arc};
@@ -17,7 +18,8 @@ use graph::data::subgraph::{
 };
 
 use crate::chain::Chain;
-use crate::trigger::NearBlockTriggerType;
+use crate::trigger::{NearBlockTriggerType, NearTrigger};
+use crate::MappingTrigger;
 
 /// Runtime representation of a data source.
 // Note: Not great for memory usage that this needs to be `Clone`, considering how there may be tens
@@ -48,7 +50,20 @@ impl blockchain::DataSource<Chain> for DataSource {
         block: Arc<<Chain as Blockchain>::Block>,
         logger: &Logger,
     ) -> Result<Option<<Chain as Blockchain>::MappingTrigger>, Error> {
-        self.match_and_decode(trigger, block, logger)
+        if self.source.start_block > block.number() {
+            return Ok(None);
+        }
+
+        match trigger {
+            NearTrigger::Block(_, trigger_type) => {
+                let handler = match self.handler_for_block(&trigger_type) {
+                    Some(handler) => handler,
+                    None => return Ok(None),
+                };
+
+                Ok(Some(MappingTrigger::Block { block, handler }))
+            }
+        }
     }
 
     fn mapping(&self) -> &Mapping {

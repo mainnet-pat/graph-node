@@ -1,4 +1,5 @@
 use anyhow::Error;
+use graph::blockchain::Block;
 use graph::components::near::NearBlock;
 use graph::data::subgraph::UnifiedMappingApiVersion;
 use graph::prelude::web3::types::H256;
@@ -26,6 +27,7 @@ use prost::Message;
 use std::sync::Arc;
 
 use crate::data_source::{DataSourceTemplate, UnresolvedDataSourceTemplate};
+use crate::trigger::{NearBlockTriggerType, NearTrigger};
 use crate::RuntimeAdapter;
 use crate::{
     data_source::{DataSource, UnresolvedDataSource},
@@ -199,7 +201,7 @@ impl Blockchain for Chain {
     ) -> Result<BlockPtr, IngestorError> {
         // FIXME (NEAR): Hmmm, what to do with this?
         Ok(BlockPtr {
-            hash: BlockHash::from(vec![0xab]),
+            hash: BlockHash::from(vec![0xff; 32]),
             number: 0,
         })
         // let eth_adapter = self
@@ -307,54 +309,14 @@ impl TriggersAdapterTrait<Chain> for TriggersAdapter {
         block: NearBlock,
         filter: &TriggerFilter,
     ) -> Result<BlockWithTriggers<Chain>, Error> {
-        Ok(BlockWithTriggers {
-            // FIXME (NEAR): Hard-coded wrong block, will need to turn them into a proper stuff
-            block: NearBlock {
-                hash: H256::from([0x00; 32]),
-                number: 0,
-                parent_hash: None,
-                parent_number: None,
-            },
-            trigger_data: vec![],
-        })
-        // let block = get_calls(
-        //     self.eth_adapter.as_ref(),
-        //     logger.clone(),
-        //     self.ethrpc_metrics.clone(),
-        //     filter.requires_traces(),
-        //     block,
-        // )
-        // .await?;
+        // FIXME (NEAR): Deal with filter when we know what kind of mapping we want
+        let block_ptr = BlockPtr::from(&block);
 
-        // match &block {
-        //     BlockFinality::Final(_) => {
-        //         let block_number = block.number() as BlockNumber;
-        //         let blocks = blocks_with_triggers(
-        //             self.eth_adapter.clone(),
-        //             logger.clone(),
-        //             self.chain_store.clone(),
-        //             self.ethrpc_metrics.clone(),
-        //             self.stopwatch_metrics.clone(),
-        //             block_number,
-        //             block_number,
-        //             filter,
-        //             self.unified_api_version.clone(),
-        //         )
-        //         .await?;
-        //         assert!(blocks.len() == 1);
-        //         Ok(blocks.into_iter().next().unwrap())
-        //     }
-        //     BlockFinality::NonFinal(full_block) => {
-        //         let mut triggers = Vec::new();
-        //         triggers.append(&mut parse_log_triggers(
-        //             &filter.log,
-        //             &full_block.ethereum_block,
-        //         ));
-        //         triggers.append(&mut parse_call_triggers(&filter.call, &full_block)?);
-        //         triggers.append(&mut parse_block_triggers(filter.block.clone(), &full_block));
-        //         Ok(BlockWithTriggers::new(block, triggers))
-        //     }
-        // }
+        // FIXME (NEAR): Share implementation with FirehoseMapper::triggers_in_block version
+        Ok(BlockWithTriggers {
+            block: block,
+            trigger_data: vec![NearTrigger::Block(block_ptr, NearBlockTriggerType::Every)],
+        })
     }
 
     async fn is_on_main_chain(&self, ptr: BlockPtr) -> Result<bool, Error> {
@@ -386,7 +348,7 @@ impl TriggersAdapterTrait<Chain> for TriggersAdapter {
     async fn parent_ptr(&self, block: &BlockPtr) -> Result<BlockPtr, Error> {
         // FIXME (NEAR): I doubt we need this now, let's see
         Ok(BlockPtr {
-            hash: BlockHash::from(vec![0xab]),
+            hash: BlockHash::from(vec![0xff; 32]),
             number: 0,
         })
         // use futures::stream::Stream;
@@ -419,35 +381,27 @@ impl FirehoseMapper {
     fn triggers_in_block(
         &self,
         _logger: &Logger,
-        block: &pb::Block,
+        block: &pb::BlockWrapper,
         filter: &TriggerFilter,
     ) -> Result<BlockWithTriggers<Chain>, FirehoseError> {
-        // FIXME (NEAR): Firehose related!
+        // FIXME (NEAR): Deal with filter when we know what kind of mapping we want
+        let block = block.block.as_ref().unwrap();
+        let header = block.header.as_ref().unwrap();
+        let near_block = NearBlock {
+            hash: H256::from_slice(&header.hash.as_ref().unwrap().bytes.clone()),
+            number: header.height,
+            parent_hash: header
+                .prev_hash
+                .as_ref()
+                .map(|v| H256::from_slice(&v.bytes.clone())),
+            parent_number: header.prev_hash.as_ref().map(|_| header.prev_height),
+        };
+        let block_ptr = BlockPtr::from(&near_block);
+
         Ok(BlockWithTriggers {
-            // FIXME (NEAR): Hard-coded wrong block, will need to turn them into a proper stuff
-            block: NearBlock {
-                hash: H256::from([0x00; 32]),
-                number: 0,
-                parent_hash: None,
-                parent_number: None,
-            },
-            trigger_data: vec![],
+            block: near_block,
+            trigger_data: vec![NearTrigger::Block(block_ptr, NearBlockTriggerType::Every)],
         })
-        // let mut triggers = Vec::new();
-
-        // let block_with_calls: EthereumBlockWithCalls = block.into();
-
-        // triggers.append(&mut parse_log_triggers(
-        //     &filter.log,
-        //     &block_with_calls.ethereum_block,
-        // ));
-        // triggers.append(&mut parse_call_triggers(&filter.call, &block_with_calls)?);
-        // triggers.append(&mut parse_block_triggers(
-        //     filter.block.clone(),
-        //     &block_with_calls,
-        // ));
-
-        // Ok(BlockWithTriggers::new(block.into(), triggers))
     }
 }
 
@@ -475,7 +429,7 @@ impl FirehoseMapperTrait<Chain> for FirehoseMapper {
         //
         // Check about adding basic information about the block in the bstream::BlockResponseV2 or maybe
         // define a slimmed down stuct that would decode only a few fields and ignore all the rest.
-        let block = pb::Block::decode(any_block.value.as_ref())?;
+        let block = pb::BlockWrapper::decode(any_block.value.as_ref())?;
 
         match step {
             bstream::ForkStep::StepNew => Ok(BlockStreamEvent::ProcessBlock(
@@ -483,24 +437,21 @@ impl FirehoseMapperTrait<Chain> for FirehoseMapper {
                 Cursor::Some(response.cursor.clone()),
             )),
 
-            bstream::ForkStep::StepUndo => Ok(BlockStreamEvent::Revert(
-                BlockPtr {
-                    hash: BlockHash::from(
-                        // FIXME (NEAR): Are we able to avoid the clone? I kind of doubt but worth checking deeper
-                        block
-                            .header
-                            .as_ref()
-                            .unwrap()
-                            .hash
-                            .as_ref()
-                            .unwrap()
-                            .bytes
-                            .clone(),
-                    ),
-                    number: block.header.as_ref().unwrap().height as i32,
-                },
-                Cursor::Some(response.cursor.clone()),
-            )),
+            bstream::ForkStep::StepUndo => {
+                let block = block.block.as_ref().unwrap();
+                let header = block.header.as_ref().unwrap();
+
+                Ok(BlockStreamEvent::Revert(
+                    BlockPtr {
+                        hash: BlockHash::from(
+                            // FIXME (NEAR): Are we able to avoid the clone? I kind of doubt but worth checking deeper
+                            header.hash.as_ref().unwrap().bytes.clone(),
+                        ),
+                        number: header.height as i32,
+                    },
+                    Cursor::Some(response.cursor.clone()),
+                ))
+            }
 
             bstream::ForkStep::StepIrreversible => {
                 panic!("irreversible step is not handled and should not be requested in the Firehose request")
@@ -530,7 +481,7 @@ impl IngestorAdapterTrait<Chain> for IngestorAdapter {
 
     async fn latest_block(&self) -> Result<BlockPtr, IngestorError> {
         Ok(BlockPtr {
-            hash: BlockHash::from(vec![0xab]),
+            hash: BlockHash::from(vec![0xff; 32]),
             number: 0,
         })
     }

@@ -1,3 +1,6 @@
+#[path = "sf.near.codec.v1.rs"]
+mod pbcodec;
+
 pub mod pb {
-    tonic::include_proto!("sf.near.codec.v1");
+    pub use super::pbcodec::*;
 }

@@ -1638,6 +1638,7 @@ dependencies = [
  "futures 0.3.16",
  "graph",
  "graph-chain-ethereum",
+ "graph-chain-near",
  "graph-mock",
  "graph-runtime-wasm",
  "graphql-parser",

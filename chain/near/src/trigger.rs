@@ -1,4 +1,3 @@
-use crate::runtime::abi::AscNearBlock;
 use graph::blockchain;
 use graph::blockchain::TriggerData;
 use graph::components::near::NearBlock;
@@ -13,8 +12,6 @@ use graph::runtime::AscHeap;
 use graph::runtime::AscPtr;
 use graph::runtime::DeterministicHostError;
 use graph::slog::{o, SendSyncRefUnwindSafeKV};
-use std::convert::TryFrom;
-use std::ops::Deref;
 use std::{cmp::Ordering, sync::Arc};
 
 pub enum MappingTrigger {
@@ -127,7 +124,6 @@ impl TriggerData for NearTrigger {
     }
 }
 
-/// Ethereum block data.
 #[derive(Clone, Debug, Default)]
 pub struct NearBlockData {
     pub hash: H256,

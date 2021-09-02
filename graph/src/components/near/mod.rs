@@ -1,3 +1,3 @@
 mod types;
 
-pub use self::types::NearBlock;
+pub use self::types::{NearBlock, NearBlockExt};

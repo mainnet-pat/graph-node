@@ -271,7 +271,8 @@ where
             .logger_factory
             .subgraph_logger(&DeploymentLocator::new(DeploymentId(0), hash.clone()));
 
-        let unvalidated = UnvalidatedSubgraphManifest::<graph_chain_ethereum::Chain>::resolve(
+        // FIXME (NEAR): This was graph_chain_ethereum before, changed temporarly to `graph_chain_near`
+        let unvalidated = UnvalidatedSubgraphManifest::<graph_chain_near::Chain>::resolve(
             hash,
             self.resolver.clone(),
             &logger,
