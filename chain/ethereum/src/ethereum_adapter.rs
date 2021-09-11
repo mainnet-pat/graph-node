@@ -1111,6 +1111,9 @@ impl EthereumAdapterTrait for EthereumAdapter {
                                     // block. Parity nodes seem to return receipts with no block
                                     // hash when a transaction is no longer in the main chain, so
                                     // treat that case the same as a receipt being absent entirely.
+                                    Ok(receipt)
+                                    // Ignore that for SBCH
+                                    /*
                                     if receipt.block_hash != Some(block_hash) {
                                         info!(
                                             logger, "receipt block mismatch";
@@ -1130,7 +1133,7 @@ impl EthereumAdapterTrait for EthereumAdapter {
                                         Err(IngestorError::BlockUnavailable(block_hash))
                                     } else {
                                         Ok(receipt)
-                                    }
+                                    }*/
                                 })
                         })
                         .collect::<Vec<_>>();
