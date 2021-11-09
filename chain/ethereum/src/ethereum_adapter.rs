@@ -182,7 +182,7 @@ impl EthereumAdapter {
             url_hostname: Arc::new(hostname),
             web3,
             metrics: provider_metrics,
-            supports_eip_1898: supports_eip_1898 && !is_ganache,
+            supports_eip_1898: false, //supports_eip_1898 && !is_ganache,
         }
     }
 

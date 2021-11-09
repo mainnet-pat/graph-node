@@ -1,6 +1,7 @@
 version: '3'
 services:
   graph-node:
+    restart: always
     image: graphprotocol/graph-node
     ports:
       - '8000:8000'
@@ -17,8 +18,8 @@ services:
       postgres_pass: let-me-in
       postgres_db: graph-node
       ipfs: 'ipfs:5001'
-      ethereum: 'mainnet:http://host.docker.internal:8545'
-      GRAPH_LOG: info
+      RUST_BACKTRACE: full
+      ethereum: 'smartbch:https://global.uat.cash'
   ipfs:
     image: ipfs/go-ipfs:v0.4.23
     ports:
