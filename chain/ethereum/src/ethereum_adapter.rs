@@ -74,7 +74,9 @@ pub struct EthereumAdapter {
 /// with the default. This means that we do not support indexing against a Geth node with
 /// `RPCGasCap` set below 50 million.
 // See also f0af4ab0-6b7c-4b68-9141-5b79346a5f61.
-const ETH_CALL_GAS: u32 = 50_000_000;
+
+// 30_000_000 for dogechain
+const ETH_CALL_GAS: u32 = 30_000_000;
 
 impl CheapClone for EthereumAdapter {
     fn cheap_clone(&self) -> Self {
@@ -1847,6 +1849,8 @@ fn resolve_transaction_receipt(
             // Check if the receipt has a block hash and is for the right block. Parity nodes seem
             // to return receipts with no block hash when a transaction is no longer in the main
             // chain, so treat that case the same as a receipt being absent entirely.
+            Ok(receipt)
+            /*
             if receipt.block_hash != Some(block_hash) {
                 info!(
                     logger, "receipt block mismatch";
@@ -1865,6 +1869,7 @@ fn resolve_transaction_receipt(
             } else {
                 Ok(receipt)
             }
+            */
         }
         None => {
             // No receipt was returned.
